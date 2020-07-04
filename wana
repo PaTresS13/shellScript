@@ -1,0 +1,348 @@
+#!/bin/sh
+
+#/************************************************
+# 	Soubor: wana
+# 	Datum: 27.03.2019
+#	Autor: Patrik Tomov, xtomov02@stud.fit.vutbr.cz
+#	Projekt: Analýza záznamu webového serveru
+#************************************************/
+
+POSIXLY_CORRECT=yes
+export LC_ALL=C
+
+#Variables
+A_FIL=false
+B_FIL=false
+IP_FIL=false
+URI_FIL=false
+LIST_IP=false
+LIST_HOSTS=false
+LIST_URI=false
+HIST_IP=false
+HIST_LOAD=false
+
+IPv4="^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
+IPv6="^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$"
+DATEREGEX="^([12][0-9]{3}-(0?[1-9]|1[0-2])-(0?[1-9]|[12][0-9]|3[01]) (0?[1-9]|1[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?)$"
+COMMAND=false
+FILTER=false
+FILE=false
+
+#if script doesnt have arguments print logs from STDIN
+if [ $# -eq 0 ]; then
+	LOGFILE=$(awk '{print $0}' <&0)
+	echo "$LOGFILE"
+	exit 0
+fi
+
+#Getting arguments
+while [ $# -gt 0 ];
+do
+	key="$1"
+	
+	case $key in
+		##########################FILTERS###########################
+		-a)
+			DATEAFTER="$2"
+			if [ "$DATEAFTER" = "" ]; then   # testing if date missing
+				>&2 echo "Missding DATE!"
+				exit 1
+			fi
+			TEST=$( (echo "$DATEAFTER" | grep -Eq "$DATEREGEX") || (echo ERROR) )
+			if [ "$TEST" = "ERROR" ]; then   #Testing if DATE is in good format
+				>&2 echo "Wrong format of date!"
+				exit 1
+			fi
+			DATELENGHT1="${#DATEAFTER}"
+			if [ "$(uname)" = "Linux" ]; then 
+
+				DATEAFTER=$(date -d "$DATEAFTER" +"%Y%m%d%H%M%S") 
+
+			elif [ "$(uname)" = "FreeBSD" ]; then
+
+				if [ "$DATELENGHT1" -eq 19 ]; then
+					DATEAFTER=$(date -j -f "%Y-%m-%d %H:%M:%S" "$DATEAFTER" +"%Y%m%d%H%M%S")
+				elif [ "$DATELENGHT1" -eq 16 ]; then
+					DATEAFTER=$(date -j -f "%Y-%m-%d %H:%M" "$DATEAFTER" +"%Y%m%d%H%M00")
+				fi
+			fi	
+			A_FIL=true
+			FILTER=true
+			shift
+			shift
+			;;
+		-b)
+			DATEBEFORE="$2"
+			if [ "$DATEBEFORE" = "" ]; then   # testing if date missing
+				>&2 echo "Missding DATE!"
+				exit 1
+			fi
+			TEST=$( (echo "$DATEBEFORE" | grep -Eq "$DATEREGEX") || (echo ERROR) )
+			if [ "$TEST" = "ERROR" ]; then   #Testing if DATE is in good format
+				>&2 echo "Wrong format of date!"
+				exit 1
+			fi
+			DATELENGHT2="${#DATEBEFORE}"
+			if [ "$(uname)" = "Linux" ]; then
+
+				DATEBEFORE=$(date -d "$DATEBEFORE" +"%Y%m%d%H%M%S")
+
+			elif [ "$(uname)" = "FreeBSD" ]; then
+
+				if [ "$DATELENGHT2" -eq 19 ]; then
+					DATEBEFORE=$(date -j -f "%Y-%m-%d %H:%M:%S" "$DATEBEFORE" +"%Y%m%d%H%M%S")
+				elif [ "$DATELENGHT2" -eq 16 ]; then
+					DATEBEFORE=$(date -j -f "%Y-%m-%d %H:%M" "$DATEBEFORE" +"%Y%m%d%H%M00")
+				fi
+			fi			
+			B_FIL=true
+			FILTER=true
+			shift
+			shift
+			;;
+		-ip)
+			IPADDR=$2
+			IP4=$( (echo "$IPADDR" | grep -Eq "$IPv4") || (echo ERROR) )
+			IP6=$( (echo "$IPADDR" | grep -Eq "$IPv6") || (echo ERROR) )
+			if [ "$IP4" = "ERROR" ] && [ "$IP6" = "ERROR" ]; then   #Testing if IPADDR is in good format
+				>&2 echo "Wrong format of IP adress!"
+				exit 1
+			fi
+			IP_FIL=true
+			FILTER=true
+			shift
+			shift
+			;;
+		-uri)
+			URI=$2
+			URI_FIL=true
+			FILTER=true
+			shift
+			shift
+			;;
+		##########################COMMANDS###########################
+		list-ip)
+			LIST_IP=true
+			COMMAND=true
+			shift
+			;;
+		list-hosts)
+			LIST_HOSTS=true
+			COMMAND=true
+			shift
+			;;
+		list-uri)
+			LIST_URI=true
+			COMMAND=true
+			shift
+			;;
+		hist-ip)
+			HIST_IP=true
+			COMMAND=true
+			shift
+			;;
+		hist-load)
+			HIST_LOAD=true
+			COMMAND=true
+			shift
+			;;
+		##########################BREAKING###########################	
+		*)	
+			break
+			;;
+	esac	
+done
+##############################################################################################################PROCCESSING LOGS################################################################################################################
+while [ $# -gt 0 ]
+do
+	FILE=true
+	key="$1"
+	case $key in
+		*.gz) #if file is zipped
+			if [ ! -f "$1" ]; then
+				>&2 echo "Wrong file!"
+				exit 1
+			fi
+			if [ -z "$LOGFILE" ]; then
+				LOGFILE="$LOGFILE$(zcat "$1")"
+				shift
+			else
+				LOGFILE="$LOGFILE\n$(zcat "$1")"
+				shift
+			fi
+			;;
+		*) #regular file
+			if [ ! -f "$1" ]; then
+				>&2 echo "Wrong file!"
+				exit 1
+			fi
+			if [ -z "$LOGFILE" ]; then
+				LOGFILE="$LOGFILE$(cat "$1")" 
+				shift
+			else
+				LOGFILE="$LOGFILE\n$(cat "$1")"
+				shift
+			fi
+			;;
+	esac
+done
+
+#Checking if there was filter or command or both if yes and file wasnt given LOGFILE=STDIN
+if [ "$FILTER" = "true" ] || [ "$COMMAND" = "true" ] && [ "$FILE" = "false" ]; then
+	LOGFILE=$(awk '{print $0}' <&0)
+fi
+
+#####################################################################################################################FILTERS##################################################################################################################
+######################DATEAFTER#######################
+if $A_FIL; then
+	IFS="
+	"
+	for line in $(printf "%b" "$LOGFILE")
+	do
+		LOGDATE=$(echo "$line" | awk '{print $4}')     #getting dates from LOG
+
+		if [ "$(uname)" = "Linux" ]; then
+			LOGDATE=$(date -d "$(echo "$LOGDATE" | tr "/" "-" | tr "[" " " | sed 's/:/ /')" +"%Y%m%d%H%M%S")    #converting dates to numbers
+		elif [ "$(uname)" = "FreeBSD" ]; then
+			LOGDATE=$(date -j -f "[%d/%b/%Y:%H:%M:%S" "$LOGDATE" +"%Y%m%d%H%M%S")				
+		fi
+
+	  	if [ "$DATEAFTER" -lt "$LOGDATE" ];then            #compering date with date in argument
+	  		FILTERED_LOGFILE1="$FILTERED_LOGFILE1$line\n"    #if condition is true put line in LOG
+	 	fi
+	done
+	LOGFILE="${FILTERED_LOGFILE1%??}"
+fi
+
+######################DATEBEFORE######################
+if $B_FIL; then
+	IFS="
+	"
+	for line in $(printf "%b" "$LOGFILE")
+	do
+		LOGDATE=$(echo "$line" | awk '{print $4}')   #getting dates from LOG
+		
+		if [ "$(uname)" = "Linux" ]; then
+			LOGDATE=$(date -d "$(echo "$LOGDATE" | tr "/" "-" | tr "[" " " | sed 's/:/ /')" +"%Y%m%d%H%M%S")    #converting dates to numbers
+		elif [ "$(uname)" = "FreeBSD" ]; then
+			LOGDATE=$(date -j -f "[%d/%b/%Y:%H:%M:%S" "$LOGDATE" +"%Y%m%d%H%M%S")			
+		fi
+
+	  	if [ "$DATEBEFORE" -gt "$LOGDATE" ];then           #compering date with date in argument
+	  		FILTERED_LOGFILE2="$FILTERED_LOGFILE2$line\n"    #if condition is true put line in final LOG
+	 	fi
+	done
+	LOGFILE="${FILTERED_LOGFILE2%??}"
+fi
+#########################IPADDR#########################
+if $IP_FIL; then
+	LOGFILE=$(printf "%b" "$LOGFILE" | awk -v ip="$IPADDR" '$1 == ip')     #comparing IPs with IP in argument
+fi
+
+###########################URI##########################
+if $URI_FIL; then
+	IFS="
+	"
+	for line in $(printf "%b" "$LOGFILE")
+	do
+		TEMPLOG=$(echo "$line" | awk '/HTTP/ {print $7}')        #checking if there is HTTP in line if yes getting $7
+		TEMPLOG=$(echo "$TEMPLOG" | grep -Eq "$URI")             #comparing $7 with regex in argument
+		if [ "$?" = 0 ]; then                                    #if result of last command was 0 add line to final LOG
+			if [ -z "$LOGURI" ]; then
+				LOGURI="$LOGURI$line"
+			else
+				LOGURI="$LOGURI$\n$line"
+			fi
+		fi 
+	done
+	LOGFILE="$LOGURI"
+fi
+
+#Checking if is COMMAND in arguments if no print LOGFILE after filters done 
+if [ "$A_FIL" = "true" ] || [ "$B_FIL" = "true" ] || [ "$IP_FIL" = "true" ] || [ "$URI_FIL" = "true" ] && [ "$COMMAND" = "false" ] ; then
+	printf "%b\n" "$LOGFILE"
+	exit 0
+fi
+
+#Checking if there is FILTER or COMMAND if no print LOGFILE
+if [ "$FILTER" = "false" ] && [ "$COMMAND" = "false" ]; then
+	printf "%b\n" "$LOGFILE"
+	exit 0
+fi
+
+####################################################################################################################COMMANDS####################################################################################################################
+######################list-ip######################
+if $LIST_IP; then
+	LOGFILE=$(echo "$LOGFILE" | awk '{print $1}' | sort | uniq)      #getting IPs from final LOG, sort ,uniq and print to stdout
+	printf "%b\n" "$LOGFILE"
+fi
+
+######################list-hosts######################
+if $LIST_HOSTS; then
+	LOGFILE=$(printf "%b" "$LOGFILE" | awk '{print $1}' | sort | uniq)     #getting only IPs to final LOG sort and uniq them
+	IFS="
+	"
+	for line in $(printf "%b" "$LOGFILE")    #going throught IPs (because one IP is on one line)
+	do
+		TEMPLOG=$(host "$line" | cut -d " " -f 5)   #getting host name of IP
+		if [ "$TEMPLOG" = "3(NXDOMAIN)" ] || [ "$TEMPLOG" = "2(SERVFAIL)" ]; then	#if Ip doesnt have host name IP stays
+			TEMPLOG="$line"
+		fi
+		if [ -z "$FINALLOG" ]; then		 #getting final log
+			FINALLOG="$FINALLOG$TEMPLOG"
+		else
+			FINALLOG="$FINALLOG\n$TEMPLOG"
+		fi
+	done
+	LOGFILE="$FINALLOG"
+	printf "%b\n" "$LOGFILE"
+fi
+
+######################list-uri######################
+
+if $LIST_URI; then
+	LOGFILE=$(printf "%b" "$LOGFILE" | awk '/HTTP/ {print $7}' | sort | uniq)		  #if there is HTTP on line get $7, sort and uniq
+	printf "%b\n" "$LOGFILE"
+fi
+
+######################hist-ip######################
+
+if $HIST_IP; then		 #getting IPs then sort, count and sort reverse then print "#"
+	LOGFILE=$(printf "%b" "$LOGFILE" | awk '{print $1}' | sort | uniq -c | sort -r | awk '{printf "%s %s(%d): ", $2, $3, $1;		
+	for(i = 1; i <= $1; i++)
+	{
+		if (i == $1) printf "#\n"
+		else printf "#"
+	}
+	}')
+	printf "%b\n" "$LOGFILE"
+fi
+
+if $HIST_LOAD; then
+	IFS="
+	"
+	for line in $(printf "%b" "$LOGFILE")		   #get ready final LOG with format of date which I want to
+	do
+		LOGDATE=$(echo "$line" | awk '{print $4}')
+
+		if [ "$(uname)" = "Linux" ]; then
+			LOGDATE=$(date -d "$(echo "$LOGDATE" | tr "/" "-" | tr "[" " " | sed 's/:/ /')" +"%Y-%m-%d %H")
+		elif [ "$(uname)" = "FreeBSD" ]; then
+			LOGDATE=$(date -j -f "[%d/%b/%Y:%H:%M:%S" "$LOGDATE" +"%Y-%m-%d %H")			
+		fi
+	
+		if [ -z "$FINALLOG" ]; then
+			FINALLOG="$FINALLOG$LOGDATE"
+		else
+			FINALLOG="$FINALLOG\n$LOGDATE"
+		fi
+	done 																									   	   #sort, count final log and then print "#"
+	LOGFILE=$(printf "%b" "$FINALLOG" | sort | uniq -c | awk -F ' ' '{printf "%s %s:00 (%d): ", $2, $3, $1;		   
+	for(i = 1; i <= $1; i++)
+	{
+		if (i == $1) printf "#\n"
+		else printf "#"
+	}
+	}')
+	printf "%b\n" "$LOGFILE"
+fi
